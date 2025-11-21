@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TasksParser</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="glass-container">
+        <div class="title-bar" id="titleBar">
+            <div class="window-title">TasksParser - Task Analysis</div>
+            <div class="window-controls">
+                <button class="control-btn minimize-btn" onclick="minimizeWindow()">−</button>
+                <button class="control-btn maximize-btn" onclick="maximizeWindow()">□</button>
+                <button class="control-btn close-btn" onclick="closeWindow()">×</button>
+            </div>
+        </div>
+        
+        <div class="control-panel">
+            <div class="scan-controls">
+                <button id="scanBtn" class="scan-button" onclick="startScan()">
+                    <span class="button-text">Scan Tasks</span>
+                    <span class="button-loading">Scanning...</span>
+                </button>
+                <button id="stopBtn" class="stop-button" onclick="stopScan()" disabled>Stop Scan</button>
+                <button id="clearBtn" class="clear-button" onclick="clearResults()">Clear Results</button>
+            </div>
+            
+            <div class="search-section">
+                <input type="text" class="search-bar" placeholder="Search tasks..." id="searchInput" onkeyup="filterFiles()">
+                <div class="toggle-section">
+                    <div class="toggle-container">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="unsignedToggle" onchange="filterFiles()">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="toggle-label">Unsigned</span>
+                    </div>
+                    <div class="toggle-container">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="onLogonToggle" onchange="filterFiles()">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="toggle-label">On Logon</span>
+                    </div>
+                    <div class="toggle-container">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="flaggedToggle" onchange="filterFiles()">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="toggle-label">Flagged</span>
+                    </div>
+                    <div class="toggle-container">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="argumentsToggle" onchange="filterFiles()">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="toggle-label">Has Arguments</span>
+                    </div>
+                    <div class="toggle-container">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="deletedToggle" onchange="filterFiles()">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="toggle-label">Deleted</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="status-bar">
+            <div class="status-item">
+                <span class="status-label">Status:</span>
+                <span id="statusText" class="status-text">Ready - Click Scan Tasks to analyze scheduled tasks</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Progress:</span>
+                <span id="progressText" class="status-text">0%</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Tasks Scanned:</span>
+                <span id="filesScanned" class="status-text">0</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Results:</span>
+                <span id="resultsFound" class="status-text">0</span>
+            </div>
+        </div>
+        
+        <div class="content-area">
+            <div class="grid-header">
+                <div>Task Name</div>
+                <div>Path</div>
+                <div>Arguments</div>
+                <div>Signature</div>
+                <div>On Logon</div>
+                <div>Detections</div>
+            </div>
+            
+            <div id="filesGrid" class="files-grid">
+                <div class="no-results">
+                    No scan results yet.<br>
+                    Click "Scan Tasks" to analyze Windows scheduled tasks.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allResults = [];
+        let isScanning = false;
+        let isDragging = false;
+        let dragOffset = { x: 0, y: 0 };
+
+        function minimizeWindow() {
+            if (window.pywebview && window.pywebview.api) {
+                pywebview.api.window_minimize();
+            }
+        }
+
+        function maximizeWindow() {
+            if (window.pywebview && window.pywebview.api) {
+                pywebview.api.window_maximize();
+            }
+        }
+
+        function closeWindow() {
+            if (window.pywebview && window.pywebview.api) {
+                pywebview.api.window_close();
+            }
+        }
+
+        const titleBar = document.getElementById('titleBar');
+
+        titleBar.addEventListener('mousedown', startDrag);
+        document.addEventListener('mousemove', doDrag);
+        document.addEventListener('mouseup', stopDrag);
+
+        function startDrag(e) {
+            isDragging = true;
+            dragOffset.x = e.clientX;
+            dragOffset.y = e.clientY;
+            titleBar.style.cursor = 'grabbing';
+            e.preventDefault();
+        }
+
+        function doDrag(e) {
+            if (!isDragging) return;
+            
+            if (window.pywebview && window.pywebview.api) {
+                const moveX = e.screenX - dragOffset.x;
+                const moveY = e.screenY - dragOffset.y;
+                pywebview.api.window_move(moveX, moveY);
+            }
+        }
+
+        function stopDrag() {
+            isDragging = false;
+            titleBar.style.cursor = 'grab';
+        }
+
+        async function startScan() {
+            if (isScanning) return;
+            
+            isScanning = true;
+            updateUIForScanning(true);
+            updateStatus('Scanning Windows Task Scheduler...', 0, 0, 0);
+            
+            try {
+                if (window.pywebview && window.pywebview.api) {
+                    const success = await pywebview.api.start_scan();
+                    if (!success) {
+                        throw new Error('Failed to start scan');
+                    }
+                } else {
+                    throw new Error('Python backend not available');
+                }
+            } catch (e) {
+                console.error('Error starting scan:', e);
+                showError('Failed to start scan: ' + e.message);
+                updateUIForScanning(false);
+            }
+        }
+
+        async function stopScan() {
+            if (!isScanning) return;
+            
+            try {
+                if (window.pywebview && window.pywebview.api) {
+                    await pywebview.api.stop_scan();
+                }
+            } catch (e) {
+                console.error('Error stopping scan:', e);
+            }
+            
+            updateUIForScanning(false);
+        }
+
+        async function clearResults() {
+            try {
+                if (window.pywebview && window.pywebview.api) {
+                    await pywebview.api.clear_results();
+                }
+                clearAllResults();
+                updateStatus('Ready - Click Scan Tasks to analyze scheduled tasks', 0, 0, 0);
+            } catch (e) {
+                console.error('Error clearing results:', e);
+            }
+        }
+
+        function clearAllResults() {
+            allResults = [];
+            const grid = document.getElementById('filesGrid');
+            grid.innerHTML = '<div class="no-results">No scan results yet.<br>Click "Scan Tasks" to analyze Windows scheduled tasks.</div>';
+            document.getElementById('resultsFound').textContent = '0';
+        }
+
+        function updateUIForScanning(scanning) {
+            isScanning = scanning;
+            const scanBtn = document.getElementById('scanBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const clearBtn = document.getElementById('clearBtn');
+            
+            scanBtn.disabled = scanning;
+            stopBtn.disabled = !scanning;
+            clearBtn.disabled = scanning;
+            
+            const buttonText = scanBtn.querySelector('.button-text');
+            const buttonLoading = scanBtn.querySelector('.button-loading');
+            
+            if (scanning) {
+                buttonText.style.display = 'none';
+                buttonLoading.style.display = 'inline';
+                document.getElementById('statusText').className = 'status-text scanning';
+            } else {
+                buttonText.style.display = 'inline';
+                buttonLoading.style.display = 'none';
+                document.getElementById('statusText').className = 'status-text';
+            }
+        }
+
+        function updateProgress(progress, scanned, total) {
+            document.getElementById('progressText').textContent = Math.round(progress) + '%';
+            document.getElementById('filesScanned').textContent = scanned + ' / ' + total;
+        }
+
+        function updateStatus(status, progress, scanned, found) {
+            document.getElementById('statusText').textContent = status;
+            document.getElementById('progressText').textContent = progress + '%';
+            document.getElementById('filesScanned').textContent = scanned;
+            document.getElementById('resultsFound').textContent = found;
+        }
+
+        function showError(message) {
+            document.getElementById('statusText').textContent = 'Error: ' + message;
+            document.getElementById('statusText').className = 'status-text error';
+        }
+
+        function addResult(result) {
+            allResults.push(result);
+            filterFiles();
+        }
+
+        function scanComplete() {
+            updateUIForScanning(false);
+            if (allResults.length > 0) {
+                updateStatus('Complete - ' + allResults.length + ' tasks analyzed', 100, allResults.length, allResults.length);
+            } else {
+                updateStatus('Complete - No tasks found to analyze', 100, 0, 0);
+            }
+        }
+
+        function showCopyFeedback(text) {
+            const feedback = document.createElement('div');
+            feedback.className = 'copy-feedback';
+            feedback.textContent = text;
+            document.body.appendChild(feedback);
+            
+            setTimeout(() => {
+                if (feedback.parentNode) {
+                    feedback.parentNode.removeChild(feedback);
+                }
+            }, 2000);
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showCopyFeedback('Copied to clipboard!');
+            }).catch(err => {
+                console.error('Failed to copy: ', err);
+                showCopyFeedback('Copy failed!');
+            });
+        }
+
+        function populateFiles(files) {
+            const grid = document.getElementById('filesGrid');
+            
+            if (files.length === 0) {
+                grid.innerHTML = '<div class="no-results">No tasks found matching current filters.</div>';
+                document.getElementById('resultsFound').textContent = '0';
+                return;
+            }
+            
+            grid.innerHTML = '';
+            
+            files.forEach(file => {
+                const row = document.createElement('div');
+                row.className = 'grid-row';
+                
+                const signatureClass = file.signature === 'valid' ? 'status-valid' : 
+                                    file.signature === 'unsigned' ? 'status-unsigned' : 
+                                    file.signature === 'deleted' ? 'status-deleted' : 'status-invalid';
+                
+                const signatureText = file.signature === 'valid' ? 'Valid' :
+                                   file.signature === 'unsigned' ? 'Unsigned' :
+                                   file.signature === 'deleted' ? 'Deleted' : 'Invalid';
+                
+                const onLogonClass = file.on_logon === 'Yes' ? 'on-logon-yes' : 'on-logon-no';
+                const onLogonText = file.on_logon === 'Yes' ? 'Yes' : 'No';
+                
+                const flagsHtml = file.detections && file.detections.length > 0 
+                    ? file.detections.map(flag => `<span class="flag-item">${flag}</span>`).join('')
+                    : '<span class="no-flags">None</span>';
+                
+                row.innerHTML = `
+                    <div class="filename" title="${file.name}">${file.name}</div>
+                    <div class="filepath" title="${file.path}">${file.path || 'N/A'}</div>
+                    <div class="arguments" title="${file.arguments}">${file.arguments || 'N/A'}</div>
+                    <div class="${signatureClass}">${signatureText}</div>
+                    <div class="${onLogonClass}">${onLogonText}</div>
+                    <div class="flags-list">${flagsHtml}</div>
+                `;
+                
+                const cells = row.querySelectorAll('div');
+                cells.forEach(cell => {
+                    cell.addEventListener('click', (e) => {
+                        if (e.shiftKey || e.button === 2) {
+                            copyToClipboard(cell.textContent || cell.innerText);
+                            e.preventDefault();
+                        }
+                    });
+                    
+                    cell.addEventListener('contextmenu', (e) => {
+                        copyToClipboard(cell.textContent || cell.innerText);
+                        e.preventDefault();
+                    });
+                });
+                
+                grid.appendChild(row);
+            });
+            
+            document.getElementById('resultsFound').textContent = files.length;
+        }
+
+        function filterFiles() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const unsignedChecked = document.getElementById('unsignedToggle').checked;
+            const onLogonChecked = document.getElementById('onLogonToggle').checked;
+            const flaggedChecked = document.getElementById('flaggedToggle').checked;
+            const argumentsChecked = document.getElementById('argumentsToggle').checked;
+            const deletedChecked = document.getElementById('deletedToggle').checked;
+
+            const filteredFiles = allResults.filter(file => {
+                const matchesSearch = file.name.toLowerCase().includes(searchTerm) || 
+                                    (file.path && file.path.toLowerCase().includes(searchTerm)) ||
+                                    (file.arguments && file.arguments.toLowerCase().includes(searchTerm)) ||
+                                    file.signature.toLowerCase().includes(searchTerm) ||
+                                    file.on_logon.toLowerCase().includes(searchTerm) ||
+                                    (file.detections && file.detections.join(' ').toLowerCase().includes(searchTerm));
+                
+                const matchesUnsigned = !unsignedChecked || file.signature === 'unsigned';
+                const matchesOnLogon = !onLogonChecked || file.on_logon === 'Yes';
+                const matchesFlagged = !flaggedChecked || (file.detections && file.detections.length > 0);
+                const matchesArguments = !argumentsChecked || (file.arguments && file.arguments.trim() !== '');
+                const matchesDeleted = !deletedChecked || file.signature === 'deleted';
+                
+                return matchesSearch && matchesUnsigned && matchesOnLogon && matchesFlagged && matchesArguments && matchesDeleted;
+            });
+
+            populateFiles(filteredFiles);
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            updateStatus('Ready - Click Scan Tasks to analyze scheduled tasks', 0, 0, 0);
+            titleBar.style.cursor = 'grab';
+            
+            document.querySelector('.button-loading').style.display = 'none';
+            
+            document.addEventListener('contextmenu', (e) => {
+                if (e.target.closest('.grid-row')) {
+                    e.preventDefault();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
