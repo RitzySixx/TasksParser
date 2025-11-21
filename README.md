@@ -1,4 +1,3 @@
-```markdown
 # TasksParser
 
 ![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
@@ -21,7 +20,6 @@ A modern Windows Task Scheduler analyzer that detects suspicious scheduled tasks
 |---------------|-------------|
 | **Proxy Execution** | Detects when system executables are used to run other suspicious files |
 | **GhostTask Persistence** | Identifies registry-only tasks without XML files (Registry Mismatch) |
-```
 
 ## 📦 Installation
 
